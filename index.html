@@ -1,1 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIRAL REACH - Earn by Social Tasks</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial}
+body{background:#f5f7fb;padding:15px}
+.card{background:white;padding:15px;border-radius:12px;margin-bottom:15px;box-shadow:0 2px 8px #0001}
+.btn{background:#0a7cff;color:white;padding:12px;border:none;border-radius:8px;width:100%;font-weight:bold;margin-top:8px}
+.btn-green{background:#0ac15e}
+input,select{width:100%;padding:12px;margin:6px 0;border:1px solid #ccc;border-radius:8px}
+h2{color:#0a7cff}
+.coin{color:#0ac15e;font-weight:bold}
+.task{border-left:4px solid #0a7cff;padding-left:10px;margin:10px 0}
+</style>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
 
+<div class="card">
+<h2>VIRAL REACH</h2>
+<p>Earn coins by doing social media tasks. 1000 coins = 100 Naira</p>
+<div id="userInfo">Not logged in</div>
+<div id="coinBal" class="coin">Coins: 0 (N0)</div>
+</div>
+
+<div class="card" id="authCard">
+<h3>Login / Register (Phone = 1 Account)</h3>
+<input id="phone" placeholder="+2376XXXXXXXX or +2348XXXXXXXX">
+<div id="recaptcha"></div>
+<button class="btn" onclick="sendOTP()">Send OTP</button>
+<input id="otp" placeholder="Enter OTP">
+<button class="btn btn-green" onclick="verifyOTP()">Verify & Login</button>
+</div>
+
+<div class="card">
+<h3>Upgrade to SMART - N500</h3>
+<p>Pay via Opay / Bank / PalmPay / MTN MoMo / Orange Money</p>
+<p>Welcome 2000 coins (N200), Per Task 300 coins (N30), Referral 2000 coins</p>
+<select id="payMethod"><option>Opay</option><option>PalmPay</option><option>Bank Transfer</option><option>MTN MoMo</option><option>Orange Money</option></select>
+<input id="payProof" placeholder="Transaction ID / Proof">
+<button class="btn" onclick="activateSmart()">I Have Paid N500 - Activate</button>
+</div>
+
+<div class="card">
+<h3>Today's Tasks (7 Platforms)</h3>
+<div id="tasks"></div>
+</div>
+
+<div class="card">
+<h3>Upload Proof (Screenshot)</h3>
+<input type="file" id="proofFile" accept="image/*">
+<select id="taskSelect"><option>FB Follow</option><option>TikTok Follow</option><option>IG Follow</option><option>YouTube Subscribe</option><option>X Follow</option><option>WhatsApp Channel</option><option>Telegram Join</option></select>
+<button class="btn" onclick="submitProof()">Submit Proof - 3 Day Hold</button>
+<p style="font-size:12px">Free: 150 coins per task, 350 for 3-in-1. Smart: 300 per task, 700 for 3-in-1</p>
+</div>
+
+<div class="card">
+<h3>Wallet & Withdraw</h3>
+<p>Min Withdraw: 5000 coins (N500)</p>
+<input id="withdrawMethod" placeholder="Bank / Opay / MoMo / Orange Number">
+<button class="btn btn-green" onclick="withdraw()">Request Withdraw</button>
+<p>Referral Link: <span id="refLink"></span></p>
+<p>Referral Earn: Free 400 coins, Smart 2000 coins (N200)</p>
+</div>
+
+<div class="card">
+<h3>Airtime / Data Shop</h3>
+<button class="btn" onclick="buyAirtime()">Buy Airtime/Data with Coins</button>
+</div>
+
+<div class="card" id="adminPanel" style="display:none;background:#111;color:white">
+<h3>ADMIN PANEL - Joseph Only</h3>
+<input id="adminPass" placeholder="Admin Password">
+<button class="btn" onclick="openAdmin()">Open</button>
+<div id="adminContent" style="display:none">
+<p>Approve Tasks / Deposits / Withdrawals</p>
+<div id="adminLists"></div>
+</div>
+</div>
+
+<script>
+// ====== REPLACE WITH YOUR FIREBASE CONFIG FROM console.firebase.google.com ======
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentUser = null;
+let isSmart = localStorage.getItem('isSmart')=='yes';
+let coins = parseInt(localStorage.getItem('coins')||'0');
+let confirmationResult = null;
+
+auth.onAuthStateChanged(user=>{
+ if(user){
+  currentUser=user;
+  document.getElementById('userInfo').innerText = "Logged: "+user.phoneNumber + (isSmart?" (SMART)":" (FREE)");
+  document.getElementById('refLink').innerText = location.href+"?ref="+user.uid.substring(0,6);
+  checkFirstTask();
+ }
+});
+
+function updateBal(){
+ localStorage.setItem('coins',coins);
+ document.getElementById('coinBal').innerText = `Coins: ${coins} (N${coins/10}) - Min Withdraw 5000`;
+}
+
+function sendOTP(){
+ const appVerifier = new firebase.auth.RecaptchaVerifier('recaptcha', {size:'invisible'});
+ auth.signInWithPhoneNumber(document.getElementById('phone').value, appVerifier)
+ .then(res=>{confirmationResult=res; alert('OTP Sent');}).catch(e=>alert(e.message));
+}
+function verifyOTP(){
+ confirmationResult.confirm(document.getElementById('otp').value).then(res=>{
+  currentUser=res.user;
+  // 1 phone = 1 account check
+  db.collection('users').doc(currentUser.uid).get().then(doc=>{
+   if(!doc.exists){
+    db.collection('users').doc(currentUser.uid).set({phone:currentUser.phoneNumber,coins:0,created:Date.now()});
+    alert('New account. Do 1 task to get welcome bonus!');
+   } else {
+    coins = doc.data().coins||0;
+    updateBal();
+   }
+  });
+ }).catch(e=>alert('Wrong OTP'));
+}
+
+function checkFirstTask(){
+ if(!localStorage.getItem('welcomed')){
+  // first task logic will trigger after proof
+ }
+}
+
+function activateSmart(){
+ // Joseph gain N100 per Smart + 30% per advertiser deposit - you approve manually
+ const method = document.getElementById('payMethod').value;
+ const proof = document.getElementById('payProof').value;
+ if(!proof){alert('Enter proof');return;}
+ db.collection('smart_requests').add({uid:currentUser.uid,phone:currentUser.phoneNumber,method,proof,time:Date.now(),status:'pending'});
+ alert('Sent to admin. After approval you get 2000 coins. You will be SMART.');
+ // For demo auto approve
+ isSmart=true; localStorage.setItem('isSmart','yes');
+}
+
+function submitProof(){
+ const task = document.getElementById('taskSelect').value;
+ if(!currentUser){alert('Login first');return;}
+ // 150 free / 300 smart per task
+ let earn = isSmart?300:150;
+ // check if first task ever
+ if(!localStorage.getItem('welcomed')){
+  earn += isSmart?2000:800;
+  localStorage.setItem('welcomed','yes');
+  alert(`First task bonus! +${isSmart?2000:800} coins`);
+ }
+ db.collection('proofs').add({uid:currentUser.uid,task,time:Date.now(),status:'pending_hold_3days',coins:earn});
+ coins+=earn; updateBal();
+ db.collection('users').doc(currentUser.uid).update({coins:firebase.firestore.FieldValue.increment(earn)});
+ alert(`Proof submitted. ${earn} coins added (3-day hold to catch unfollow). Your gain logic for admin: N100 + 30% will be tracked.`);
+ loadTasks();
+}
+
+function withdraw(){
+ if(coins<5000){alert('Min 5000 coins needed');return;}
+ const method = document.getElementById('withdrawMethod').value;
+ if(!method){alert('Enter account number');return;}
+ db.collection('withdraws').add({uid:currentUser.uid,coins,method,time:Date.now(),status:'pending'});
+ alert('Withdraw requested. Admin will approve via Bank/Opay/MoMo/Orange.');
+}
+
+function buyAirtime(){alert('Airtime shop - integrate API later. Coins will deduct.');}
+
+function loadTasks(){
+ const tDiv=document.getElementById('tasks');
+ tDiv.innerHTML=`
+ <div class="task"><b>FB Page Follow</b> - ${isSmart?300:150} coins<br><a href="#" target="_blank">Open Task Link</a></div>
+ <div class="task"><b>TikTok Follow</b> - ${isSmart?300:150} coins</div>
+ <div class="task"><b>IG + YouTube + X (3-in-1)</b> - ${isSmart?700:350} coins</div>
+ `;
+}
+loadTasks();
+updateBal();
+
+// Admin
+function openAdmin(){
+ if(document.getElementById('adminPass').value=='viral2024'){
+  document.getElementById('adminContent').style.display='block';
+  db.collection('proofs').where('status','==','pending_hold_3days').get().then(snap=>{
+   let html='';
+   snap.forEach(doc=>{html+=`<p>${doc.data().task} - ${doc.data().coins} coins - <button onclick="approveProof('${doc.id}',${doc.data().coins},'${doc.data().uid}')">Approve</button></p>`});
+   document.getElementById('adminLists').innerHTML=html;
+  });
+ } else alert('Wrong pass');
+}
+function approveProof(id,coin,uid){
+ db.collection('proofs').doc(id).update({status:'approved'});
+ alert('Approved');
+}
+</script>
+</body>
+  </html>
